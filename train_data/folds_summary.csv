@@ -1,0 +1,16 @@
+drug,drug_safe,n_cell_lines,n_splits
+Temozolomide,Temozolomide,203,5
+Olaparib,Olaparib,203,5
+PLX-4720,PLX-4720,203,5
+Nutlin-3a (-),Nutlin-3a_-_,203,5
+JQ1,JQ1,203,5
+AZD7762,AZD7762,203,5
+Palbociclib,Palbociclib,203,5
+Selumetinib,Selumetinib,203,5
+Refametinib,Refametinib,203,5
+Navitoclax,Navitoclax,203,5
+SN-38,SN-38,203,5
+PD0325901,PD0325901,203,5
+Gemcitabine,Gemcitabine,203,5
+Talazoparib,Talazoparib,203,5
+Trametinib,Trametinib,203,5
