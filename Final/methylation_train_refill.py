@@ -83,14 +83,20 @@ def safe_pearson(y_true, y_pred) -> float:
 # Text / ID normalization (same as cnv_train.py)
 # ---------------------------
 def standardize_name(name: str) -> Optional[str]:
+    """
+    Match mRNA-side normalization more closely so fold_map cell lines align across omics.
+
+    Examples:
+      HCC827_LUNG -> HCC827
+      OCIAML2_HAEMATOPOIETIC_AND_LYMPHOID_TISSUE -> OCIAML2
+      A-549 -> A549
+    """
     if pd.isna(name):
         return None
-    name = str(name).strip().upper()
-    if "_" in name:
-        name = name.split("_")[0]
-    name = re.sub(r"[^A-Z0-9]", "", name)
-    return name if name else None
-
+    x = str(name).strip().upper()
+    x = re.sub(r"_(LUNG|BLOOD|MYELOID|LYMPHOID|HAEMATOPOIETIC|HAEMATOPOIETIC_AND_LYMPHOID_TISSUE|[A-Z]+)$", "", x)
+    x = re.sub(r"[^A-Z0-9]", "", x)
+    return x if x else None
 
 
 def standardize_drug(drug: str) -> Optional[str]:
@@ -188,6 +194,95 @@ def pick_first_existing(df: pd.DataFrame, candidates: List[str], fallback_first_
         return df.columns[0]
     raise ValueError(f"None of candidates exist: {candidates}")
 
+
+
+
+def _parse_tissue_from_ccle(ccle_name: str) -> str:
+    if pd.isna(ccle_name):
+        return ""
+    x = str(ccle_name).strip().upper()
+    if "_" not in x:
+        return ""
+    return x.split("_", 1)[1]
+
+
+def _simplify_tissue(tissue_raw: str, pat_a, pat_b) -> str:
+    t = str(tissue_raw or "").upper()
+    if pat_a.search(t):
+        return "A"
+    if pat_b.search(t):
+        return "B"
+    return "OTHER"
+
+
+def build_tissue_marker_set(
+    feature_df: pd.DataFrame,
+    tissue_map_csv: str,
+    marker_d: float = 1.0,
+    group_a_pat: str = r"LUNG",
+    group_b_pat: str = r"HAEMATOPOIETIC|LYMPHOID|BLOOD|MYELOID",
+    cell_col: str = "標準化名稱",
+    ccle_col: str = "CCLE原始名稱",
+) -> Tuple[set, pd.DataFrame]:
+    """Compute tissue markers by Cohen's d using feature_df + tissue labels from map (never touches y)."""
+    tm = pd.read_csv(tissue_map_csv, low_memory=False)
+
+    if cell_col not in tm.columns:
+        for cand in ["標準化名稱", "StrippedCellLineName", "CellLine", "cellline", "cell_line", "MODEL", "CellLineName", "standardized", "Unnamed: 0"]:
+            if cand in tm.columns:
+                cell_col = cand
+                break
+    if ccle_col not in tm.columns:
+        for cand in ["CCLE原始名稱", "CCLEName", "CCLE", "ccle", "ccle_name", "CCLE_NAME"]:
+            if cand in tm.columns:
+                ccle_col = cand
+                break
+    if cell_col not in tm.columns or ccle_col not in tm.columns:
+        raise ValueError(f"tissue map csv must contain columns for cell line and CCLE name (got: {tm.columns.tolist()[:20]})")
+
+    tm["std"] = tm[cell_col].apply(standardize_name)
+    tm["tissue_raw"] = tm[ccle_col].apply(_parse_tissue_from_ccle)
+
+    pat_a = re.compile(group_a_pat, re.IGNORECASE)
+    pat_b = re.compile(group_b_pat, re.IGNORECASE)
+    tm["group"] = tm["tissue_raw"].apply(lambda t: _simplify_tissue(t, pat_a, pat_b))
+
+    tm = tm[tm["group"].isin(["A", "B"])].dropna(subset=["std"]).copy()
+    tm = tm[tm["std"].isin(feature_df.index)].drop_duplicates("std").copy()
+
+    if tm["group"].nunique() < 2:
+        raise ValueError("tissue map does not contain both groups after alignment to feature_df")
+
+    X = feature_df.loc[tm["std"]].to_numpy(dtype=np.float64)
+    lab = tm["group"].to_numpy(dtype=str)
+    maskA = lab == "A"
+    maskB = lab == "B"
+    nA, nB = int(maskA.sum()), int(maskB.sum())
+    if nA < 5 or nB < 5:
+        raise ValueError(f"Too few samples for marker computation: nA={nA}, nB={nB}")
+
+    XA = X[maskA, :]
+    XB = X[maskB, :]
+    meanA = np.nanmean(XA, axis=0)
+    meanB = np.nanmean(XB, axis=0)
+    varA = np.nanvar(XA, axis=0, ddof=1)
+    varB = np.nanvar(XB, axis=0, ddof=1)
+    pooled = np.sqrt(((nA - 1) * varA + (nB - 1) * varB) / max((nA + nB - 2), 1))
+    d = (meanA - meanB) / pooled
+    d[~np.isfinite(d)] = np.nan
+
+    marker_tbl = pd.DataFrame({
+        "feature": feature_df.columns.astype(str),
+        "mean_A": meanA,
+        "mean_B": meanB,
+        "mean_diff(A-B)": meanA - meanB,
+        "cohen_d(A-B)": d,
+    })
+    marker_tbl["marker_direction"] = np.where(marker_tbl["cohen_d(A-B)"] > 0, "A_high", "B_high")
+    marker_tbl["is_marker"] = marker_tbl["cohen_d(A-B)"].abs() >= float(marker_d)
+
+    marker_set = set(marker_tbl.loc[marker_tbl["is_marker"], "feature"].astype(str).tolist())
+    return marker_set, marker_tbl
 
 # ---------------------------
 # Calibration (linear)
@@ -539,6 +634,8 @@ def run_cv_for_drug(
     calib_inner_splits: int = 3,
     folds_mode: str = "create",
     folds_root: Optional[str] = None,
+    marker_set: Optional[set] = None,
+    ablation_mode: str = "baseline",
 ):
     sub = drug_df.loc[drug_df["Drug"] == drug_name, ["std", "Y"]].copy()
     if len(sub) == 0:
@@ -557,6 +654,11 @@ def run_cv_for_drug(
     y = sub_agg["Y"].to_numpy(dtype=np.float32)
     groups = sub_agg["std"].to_numpy()
     gene_names = np.array(meth_df.columns, dtype=object)
+
+    marker_set = set(marker_set or set())
+    ablation_mode = str(ablation_mode or "baseline").lower().strip()
+    if ablation_mode not in ["baseline", "drop_nofill", "drop_refill", "only_markers"]:
+        raise ValueError(f"Unknown ablation_mode={ablation_mode}. Use baseline/drop_nofill/drop_refill/only_markers")
 
     if folds_mode == "reuse":
         if not folds_root:
@@ -608,15 +710,56 @@ def run_cv_for_drug(
             })
     pd.DataFrame(fold_rows).sort_values(["fold", "cell_line"]).to_csv(fold_map_csv, index=False)
 
+    if ablation_mode == "only_markers":
+        if len(marker_set) == 0:
+            print(f"[SKIP] {drug_name}: marker_set is empty, cannot run only_markers.")
+            return None
+        marker_mask = np.array([g in marker_set for g in gene_names], dtype=bool)
+        if int(marker_mask.sum()) < 5:
+            print(f"[SKIP] {drug_name}: too few marker features present in methylation ({int(marker_mask.sum())}).")
+            return None
+        X_for_fs = X[:, marker_mask]
+        gene_names_for_fs = gene_names[marker_mask]
+    else:
+        X_for_fs = X
+        gene_names_for_fs = gene_names
+
     fold_feature_idx = []
     for i, (tr, te) in enumerate(folds, 1):
-        X_tr_imp, _ = impute_train_mean(X[tr], X[te])
-        idx, sc = topn_by_corr(X_tr_imp, y[tr], top_n, method=corr_method, use_abs=use_abs_corr)
+        X_tr_imp, _ = impute_train_mean(X_for_fs[tr], X_for_fs[te])
+        n_req = int(min(top_n, X_for_fs.shape[1])) if top_n > 0 else int(X_for_fs.shape[1])
+        idx_pool, sc = topn_by_corr(X_tr_imp, y[tr], n_req, method=corr_method, use_abs=use_abs_corr)
+
+        if ablation_mode == "drop_nofill":
+            keep = np.array([gene_names_for_fs[j] not in marker_set for j in idx_pool], dtype=bool)
+            idx = idx_pool[keep]
+            if len(idx) == 0:
+                big_n = int(min(max(top_n * 5, top_n + 2000), X_for_fs.shape[1])) if top_n > 0 else int(X_for_fs.shape[1])
+                X_big_imp, _ = impute_train_mean(X_for_fs[tr], X_for_fs[te])
+                idx_big = topn_by_corr(X_big_imp, y[tr], big_n, method=corr_method, use_abs=use_abs_corr)[0]
+                for j in idx_big:
+                    if gene_names_for_fs[j] not in marker_set:
+                        idx = np.array([j], dtype=int)
+                        break
+        elif ablation_mode == "drop_refill":
+            big_n = int(min(max(top_n * 5, top_n + 5000), X_for_fs.shape[1])) if top_n > 0 else int(X_for_fs.shape[1])
+            X_big_imp, _ = impute_train_mean(X_for_fs[tr], X_for_fs[te])
+            idx_big = topn_by_corr(X_big_imp, y[tr], big_n, method=corr_method, use_abs=use_abs_corr)[0]
+            keep = np.array([gene_names_for_fs[j] not in marker_set for j in idx_big], dtype=bool)
+            idx = idx_big[keep][:n_req]
+            if len(idx) == 0:
+                idx = idx_pool
+        else:
+            idx = idx_pool
+
         fold_feature_idx.append(idx)
         if top_n > 0:
-            print(f"[{drug_name}] Fold {i}: selected {len(idx)} meth genes, top1={gene_names}[idx[0]], score={sc[0]:.4f}")
+            top1 = gene_names_for_fs[idx[0]] if len(idx) > 0 else "NA"
+            print(f"[{drug_name}] Fold {i}: selected {len(idx)} meth genes | ablation={ablation_mode} | top1={top1}")
         else:
-            print(f"[{drug_name}] Fold {i}: NO feature selection, using all {len(idx)} meth genes")
+            print(f"[{drug_name}] Fold {i}: using all {len(idx)} meth genes | ablation={ablation_mode}")
+
+    X_src = X_for_fs
 
     models_dir = os.path.join(out_dir, "models")
     os.makedirs(models_dir, exist_ok=True)
@@ -628,8 +771,8 @@ def run_cv_for_drug(
     gpu_failed_once = False
 
     for i, ((tr, te), idx) in enumerate(zip(folds, fold_feature_idx), 1):
-        X_tr = X[tr][:, idx]
-        X_te = X[te][:, idx]
+        X_tr = X_src[tr][:, idx]
+        X_te = X_src[te][:, idx]
 
         X_tr, X_te = impute_train_mean(X_tr, X_te)
 
@@ -883,9 +1026,14 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--data-dir", default=".", help="Folder containing input csv files")
     ap.add_argument("--meth-file", default="Methylation_final.csv")
-    ap.add_argument("--mapping-file", default="cell_line_mapping.csv")
-    ap.add_argument("--drug-file", default="processed_drug_response.csv")
-    ap.add_argument("--good-drugs-file", default="good_drugs_summary.csv")
+    ap.add_argument("--mapping-file", default="lung_and_blood_Cline.csv")
+    ap.add_argument("--drug-file", default="processed_drug_response_with_prism.csv")
+    ap.add_argument("--good-drugs-file", default="good_drugs_summary.csv",
+                    help="CSV file containing a drug list. Uses column drug/Drug if present.")
+    ap.add_argument("--drug-list-csv", dest="drug_list_csv", type=str, default=None,
+                    help="Alias of --good-drugs-file. If omitted together with --good-drugs-file, select top-k drugs by sample count.")
+    ap.add_argument("--top-k-drugs", type=int, default=10,
+                    help="When no explicit drug list CSV is provided, train the top-k drugs ranked by number of unique cell lines in drug response.")
 
     ap.add_argument("--top-n", type=int, default=2000, help="Top-N corr features per fold. 0 = no FS")
     ap.add_argument("--corr-method", type=str, default="pearson", choices=["pearson", "spearman"])
@@ -904,6 +1052,16 @@ def main():
     ap.add_argument("--meth-id-col", type=str, default=None, help="Override methylation ID column name")
     ap.add_argument("--only-drug", type=str, default=None, help="Train only one specific drug name")
 
+    ap.add_argument("--ablation-mode", type=str, default="baseline",
+                    choices=["baseline", "drop_nofill", "drop_refill", "only_markers"],
+                    help="How to apply tissue markers during feature selection")
+    ap.add_argument("--tissue-map-csv", type=str, default=None,
+                    help="CSV containing cell line + CCLE name columns for tissue-marker computation")
+    ap.add_argument("--marker-d", type=float, default=1.0,
+                    help="Cohen's d threshold used to define tissue markers")
+    ap.add_argument("--group-a-pat", type=str, default=r"LUNG")
+    ap.add_argument("--group-b-pat", type=str, default=r"HAEMATOPOIETIC|LYMPHOID|BLOOD|MYELOID")
+
     # share folds across omics
     ap.add_argument("--folds-mode", type=str, default="create", choices=["create", "reuse"])
     ap.add_argument("--folds-root", type=str, default=None,
@@ -914,7 +1072,8 @@ def main():
     meth_path = os.path.join(DATA_DIR, args.meth_file)
     mapping_path = os.path.join(DATA_DIR, args.mapping_file)
     drug_path = os.path.join(DATA_DIR, args.drug_file)
-    good_path = os.path.join(DATA_DIR, args.good_drugs_file)
+    good_csv = args.drug_list_csv if args.drug_list_csv is not None else args.good_drugs_file
+    good_path = os.path.join(DATA_DIR, good_csv) if good_csv else None
 
     print("DATA_DIR =", DATA_DIR)
     print("meth_path =", meth_path)
@@ -931,11 +1090,41 @@ def main():
     print("drug_df:", drug_df.shape)
     print("meth_df:", meth_df.shape)
 
-    drugs = load_good_drugs(good_path)
+    marker_set = set()
+    marker_tbl = None
+    if args.ablation_mode != "baseline":
+        tissue_map_csv = args.tissue_map_csv or mapping_path
+        if not os.path.exists(tissue_map_csv):
+            raise FileNotFoundError(f"tissue-map-csv not found: {tissue_map_csv}")
+        print(f"[INFO] Building tissue marker set from: {tissue_map_csv} | marker_d={args.marker_d}")
+        marker_set, marker_tbl = build_tissue_marker_set(
+            meth_df,
+            tissue_map_csv=tissue_map_csv,
+            marker_d=args.marker_d,
+            group_a_pat=args.group_a_pat,
+            group_b_pat=args.group_b_pat,
+        )
+        print(f"[INFO] Tissue marker features: {len(marker_set)} / {meth_df.shape[1]}")
+
     if args.only_drug:
         drugs = [standardize_drug(args.only_drug)]
+    elif good_path:
+        drugs = load_good_drugs(good_path)
+        avail = set(drug_df["Drug"].dropna().astype(str).unique())
+        drugs = [d for d in drugs if d in avail]
+        if not drugs:
+            raise RuntimeError("No drugs from the provided drug list matched drug response.")
+    else:
+        drugs = (
+            drug_df.groupby("Drug")["std"]
+            .nunique()
+            .sort_values(ascending=False)
+            .head(args.top_k_drugs)
+            .index.tolist()
+        )
+
     if not drugs:
-        raise RuntimeError("No drugs found in good-drugs file.")
+        raise RuntimeError("No drugs selected for training.")
 
     # run root
     run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -946,14 +1135,26 @@ def main():
     RESULTS_ROOT = os.path.join(
         DATA_DIR,
         "results_methylation",
-        f"METH__top{args.top_n}__{args.corr_method}__abs{int(args.use_abs_corr)}__cal{int(calibrate)}__gpu{int(args.use_gpu)}__{run_id}",
+        f"METH__top{args.top_n}__{args.corr_method}__abs{int(args.use_abs_corr)}__abl{args.ablation_mode}__d{str(args.marker_d).replace('.','p')}__cal{int(calibrate)}__gpu{int(args.use_gpu)}__{run_id}",
     )
     os.makedirs(RESULTS_ROOT, exist_ok=True)
     print("RESULTS_ROOT =", RESULTS_ROOT)
 
+    if marker_tbl is not None:
+        marker_tbl.to_csv(os.path.join(RESULTS_ROOT, "tissue_marker_table.csv"), index=False)
+        with open(os.path.join(RESULTS_ROOT, "tissue_marker_meta.json"), "w", encoding="utf-8") as f:
+            json.dump({
+                "ablation_mode": args.ablation_mode,
+                "marker_d": float(args.marker_d),
+                "group_a_pat": args.group_a_pat,
+                "group_b_pat": args.group_b_pat,
+                "n_markers": int(len(marker_set)),
+            }, f, indent=2, ensure_ascii=False)
+
     all_cv = []
     all_pred = []
     skipped = []
+    audit_rows = []
 
     pdf_path = os.path.join(RESULTS_ROOT, "scatter_all_drugs.pdf")
     pdf = PdfPages(pdf_path)
@@ -983,12 +1184,23 @@ def main():
             calib_inner_splits=int(args.calib_inner_splits) if args.calib_inner_splits else 0,
             folds_mode=args.folds_mode,
             folds_root=args.folds_root,
+            marker_set=marker_set,
+            ablation_mode=args.ablation_mode,
         )
         if out is None:
             skipped.append(d)
+            audit_rows.append({"drug": d, "status": "skipped"})
             continue
 
         df_cv, pred_df, fold_feature_idx, gene_names, meta = out
+        audit_rows.append({
+            "drug": d,
+            "status": "ok",
+            "n_matched_cell_lines": int(len(meta)),
+            "n_folds": int(df_cv["fold"].nunique()) if "fold" in df_cv.columns else np.nan,
+            "mean_R2": float(df_cv["R2"].mean()) if "R2" in df_cv.columns and len(df_cv) else np.nan,
+            "mean_RMSE": float(df_cv["RMSE"].mean()) if "RMSE" in df_cv.columns and len(df_cv) else np.nan,
+        })
         all_cv.append(df_cv)
         all_pred.append(pred_df)
 
@@ -1015,6 +1227,8 @@ def main():
             "CALIB_INNER_SPLITS": int(args.calib_inner_splits),
             "USE_GPU": bool(args.use_gpu),
             "BEST_BY": args.best_by,
+            "ABLATION_MODE": args.ablation_mode,
+            "MARKER_D": float(args.marker_d),
             "FOLDS_MODE": args.folds_mode,
             "FOLDS_ROOT": args.folds_root,
         }
@@ -1033,8 +1247,12 @@ def main():
 
     pdf.close()
 
+    audit_df = pd.DataFrame(audit_rows)
+    audit_path = os.path.join(RESULTS_ROOT, "drug_run_audit.csv")
+    audit_df.to_csv(audit_path, index=False)
+
     if len(all_cv) == 0:
-        raise RuntimeError("All drugs were skipped. Check MIN_CELL_LINES or mapping.")
+        raise RuntimeError("All drugs were skipped. Check MIN_CELL_LINES, mapping, or omics naming alignment.")
 
     cv_all = pd.concat(all_cv, ignore_index=True)
     pred_all = pd.concat(all_pred, ignore_index=True)

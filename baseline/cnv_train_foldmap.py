@@ -84,13 +84,20 @@ def safe_pearson(y_true, y_pred) -> float:
 # Text / ID normalization (match your mRNA style)
 # ---------------------------
 def standardize_name(name: str) -> Optional[str]:
+    """
+    Match mRNA-side normalization more closely so fold_map cell lines align across omics.
+
+    Examples:
+      HCC827_LUNG -> HCC827
+      OCIAML2_HAEMATOPOIETIC_AND_LYMPHOID_TISSUE -> OCIAML2
+      A-549 -> A549
+    """
     if pd.isna(name):
         return None
-    name = str(name).strip().upper()
-    if "_" in name:
-        name = name.split("_")[0]
-    name = re.sub(r"[^A-Z0-9]", "", name)
-    return name if name else None
+    x = str(name).strip().upper()
+    x = re.sub(r"_(LUNG|BLOOD|MYELOID|LYMPHOID|HAEMATOPOIETIC|HAEMATOPOIETIC_AND_LYMPHOID_TISSUE|[A-Z]+)$", "", x)
+    x = re.sub(r"[^A-Z0-9]", "", x)
+    return x if x else None
 
 
 def standardize_drug(drug: str) -> Optional[str]:
@@ -963,9 +970,14 @@ def main():
 
     ap.add_argument("--data-dir", default=".", help="Folder containing input csv files")
     ap.add_argument("--cnv-file", default="DNACopyNumber_final.csv")
-    ap.add_argument("--mapping-file", default="cell_line_mapping.csv")
-    ap.add_argument("--drug-file", default="processed_drug_response.csv")
-    ap.add_argument("--good-drugs-file", default="good_drugs_summary.csv")
+    ap.add_argument("--mapping-file", default="lung_and_blood_Cline.csv")
+    ap.add_argument("--drug-file", default="processed_drug_response_with_prism.csv")
+    ap.add_argument("--good-drugs-file", default="good_drugs_summary.csv",
+                    help="CSV file containing a drug list. Uses column drug/Drug if present.")
+    ap.add_argument("--drug-list-csv", dest="drug_list_csv", type=str, default=None,
+                    help="Alias of --good-drugs-file. If omitted together with --good-drugs-file, select top-k drugs by sample count.")
+    ap.add_argument("--top-k-drugs", type=int, default=10,
+                    help="When no explicit drug list CSV is provided, train the top-k drugs ranked by number of unique cell lines in drug response.")
 
     ap.add_argument("--top-n", type=int, default=1000, help="Top-N corr features per fold. 0 = no feature selection")
     ap.add_argument("--corr-method", type=str, default="pearson", choices=["pearson", "spearman"])
@@ -995,7 +1007,8 @@ def main():
     cnv_path = os.path.join(DATA_DIR, args.cnv_file)
     mapping_path = os.path.join(DATA_DIR, args.mapping_file)
     drug_path = os.path.join(DATA_DIR, args.drug_file)
-    good_path = os.path.join(DATA_DIR, args.good_drugs_file)
+    good_csv = args.drug_list_csv if args.drug_list_csv is not None else args.good_drugs_file
+    good_path = os.path.join(DATA_DIR, good_csv) if good_csv else None
 
     print("DATA_DIR =", DATA_DIR)
     print("cnv_path =", cnv_path)
@@ -1017,11 +1030,25 @@ def main():
     print("drug_df:", drug_df.shape)
     print("cnv_df:", cnv_df.shape)
 
-    drugs = load_good_drugs(good_path)
     if args.only_drug:
         drugs = [standardize_drug(args.only_drug)]
+    elif good_path:
+        drugs = load_good_drugs(good_path)
+        avail = set(drug_df["Drug"].dropna().astype(str).unique())
+        drugs = [d for d in drugs if d in avail]
+        if not drugs:
+            raise RuntimeError("No drugs from the provided drug list matched drug response.")
+    else:
+        drugs = (
+            drug_df.groupby("Drug")["std"]
+            .nunique()
+            .sort_values(ascending=False)
+            .head(args.top_k_drugs)
+            .index.tolist()
+        )
+
     if not drugs:
-        raise RuntimeError("No drugs found in good-drugs file.")
+        raise RuntimeError("No drugs selected for training.")
 
     # ----- run root -----
     run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -1040,6 +1067,7 @@ def main():
     all_cv = []
     all_pred = []
     skipped = []
+    audit_rows = []
 
     pdf_path = os.path.join(RESULTS_ROOT, "scatter_all_drugs.pdf")
     pdf = PdfPages(pdf_path)
@@ -1072,9 +1100,18 @@ def main():
         )
         if out is None:
             skipped.append(d)
+            audit_rows.append({"drug": d, "status": "skipped"})
             continue
 
         df_cv, pred_df, fold_feature_idx, gene_names, meta = out
+        audit_rows.append({
+            "drug": d,
+            "status": "ok",
+            "n_matched_cell_lines": int(len(meta)),
+            "n_folds": int(df_cv["fold"].nunique()) if "fold" in df_cv.columns else np.nan,
+            "mean_R2": float(df_cv["R2"].mean()) if "R2" in df_cv.columns and len(df_cv) else np.nan,
+            "mean_RMSE": float(df_cv["RMSE"].mean()) if "RMSE" in df_cv.columns and len(df_cv) else np.nan,
+        })
         all_cv.append(df_cv)
         all_pred.append(pred_df)
 
@@ -1116,8 +1153,12 @@ def main():
 
     pdf.close()
 
+    audit_df = pd.DataFrame(audit_rows)
+    audit_path = os.path.join(RESULTS_ROOT, "drug_run_audit.csv")
+    audit_df.to_csv(audit_path, index=False)
+
     if len(all_cv) == 0:
-        raise RuntimeError("All drugs were skipped. Check MIN_CELL_LINES or mapping.")
+        raise RuntimeError("All drugs were skipped. Check MIN_CELL_LINES, mapping, or CNV naming alignment.")
 
     cv_all = pd.concat(all_cv, ignore_index=True)
     pred_all = pd.concat(all_pred, ignore_index=True)

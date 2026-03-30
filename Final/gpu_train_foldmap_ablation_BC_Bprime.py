@@ -614,6 +614,7 @@ def main():
     ap.add_argument("--no-scale-y", action="store_true")
     ap.add_argument("--drug-list-csv", "--good-drugs-csv", dest="drug_list_csv", type=str, default=None,
                    help="CSV file containing a list of drugs to train. Uses column `drug`/`Drug` if present; otherwise the first column.")
+    ap.add_argument("--min-cell-lines", type=int, default=10)
     args = ap.parse_args()
 
     # 嚴格對齊原始路徑名稱
@@ -695,10 +696,18 @@ def main():
     for d in top_drugs:
         print(f"Processing: {d} | ablation={args.ablation_mode}")
         d_dir = os.path.join(RESULTS_ROOT, _drug_safe_name(d)); os.makedirs(d_dir, exist_ok=True)
-        out = run_cv_for_drug(d, expression_df, drug_df, std_to_expr, d_dir,
-                             marker_set=marker_set, ablation_mode=args.ablation_mode,
-                             top_n=args.top_n, use_gpu=args.use_gpu, calibrate=args.calibrate,
-                             scale_y=(not args.no_scale_y), folds_mode=args.folds_mode, folds_root=args.folds_root)
+        out = run_cv_for_drug(
+            d, expression_df, drug_df, std_to_expr, d_dir,
+            marker_set=marker_set,
+            ablation_mode=args.ablation_mode,
+            top_n=args.top_n,
+            use_gpu=args.use_gpu,
+            calibrate=args.calibrate,
+            scale_y=(not args.no_scale_y),
+            folds_mode=args.folds_mode,
+            folds_root=args.folds_root,
+            min_cell_lines=args.min_cell_lines,
+        )
         
         if out:
             df_cv, pred_df, _, _, meta = out
