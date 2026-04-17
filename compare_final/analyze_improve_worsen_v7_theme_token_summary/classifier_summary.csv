@@ -1,0 +1,2 @@
+n_drugs_used,n_improve,n_worsen,cv_folds,cv_auc,cv_accuracy,n_selected_features,selected_features
+36,20,16,5,0.621875,0.6666666666666666,12,kd_best_pchembl | ac50_best_pchembl | Z_SCORE_abs_mean | ic50_best_pchembl | Z_SCORE_mean | aromatic_rings | theme_MAP2K_MEK_ERK_RAF_CASCADE | theme_ION_CHANNEL_TRANSPORTER | theme_EPH_RECEPTOR_SIGNALING | theme_JNK_P38_STRESS_MAPK | theme_MET_HGF_RTK | theme_SRC_LCK_NONRECEPTOR_TK

@@ -1,0 +1,28 @@
+canonical_feature,selected_source,status,candidate_chain
+max_phase,drug_feature_summary,kept,drug_feature_summary.max_phase > molecules.max_phase
+oral,drug_feature_summary,kept,drug_feature_summary.oral > molecules.oral
+black_box_warning,drug_feature_summary,kept,drug_feature_summary.black_box_warning > molecules.black_box_warning
+first_approval,drug_feature_summary,kept,drug_feature_summary.first_approval > molecules.first_approval
+full_mwt,drug_feature_summary,kept,drug_feature_summary.full_mwt > molecules.full_mwt > pubchem.MolecularWeight
+alogp_xlogp,drug_feature_summary,kept,drug_feature_summary.alogp > molecules.alogp > pubchem.XLogP
+psa_tpsa,drug_feature_summary,kept,drug_feature_summary.psa > molecules.psa > pubchem.TPSA
+hba,drug_feature_summary,kept,drug_feature_summary.hba > molecules.hba > pubchem.HBondAcceptorCount
+hbd,drug_feature_summary,kept,drug_feature_summary.hbd > molecules.hbd > pubchem.HBondDonorCount
+rtb,drug_feature_summary,kept,drug_feature_summary.rtb > molecules.rtb > pubchem.RotatableBondCount
+aromatic_rings,drug_feature_summary,kept,drug_feature_summary.aromatic_rings > molecules.aromatic_rings
+heavy_atoms,drug_feature_summary,kept,drug_feature_summary.heavy_atoms > molecules.heavy_atoms
+qed_weighted,drug_feature_summary,kept,drug_feature_summary.qed_weighted > molecules.qed_weighted
+best_pchembl,drug_feature_summary,kept,drug_feature_summary.best_pchembl
+median_pchembl,drug_feature_summary,kept,drug_feature_summary.median_pchembl
+best_standard_value,drug_feature_summary,kept,drug_feature_summary.best_standard_value
+ac50_best_pchembl,drug_feature_summary,kept,drug_feature_summary.ac50_best_pchembl
+ec50_best_pchembl,drug_feature_summary,kept,drug_feature_summary.ec50_best_pchembl
+ic50_best_pchembl,drug_feature_summary,kept,drug_feature_summary.ic50_best_pchembl
+kd_best_pchembl,drug_feature_summary,kept,drug_feature_summary.kd_best_pchembl
+ki_best_pchembl,drug_feature_summary,kept,drug_feature_summary.ki_best_pchembl
+act_pchembl_mean,activities,kept,activities.pchembl_mean
+act_pchembl_median,activities,kept,activities.pchembl_median
+act_pchembl_std,activities,kept,activities.pchembl_std
+mech_direct_interaction_mean,mechanisms,kept,mechanisms.direct_interaction_mean
+mech_disease_efficacy_mean,mechanisms,kept,mechanisms.disease_efficacy_mean
+mech_molecular_mechanism_mean,mechanisms,kept,mechanisms.molecular_mechanism_mean

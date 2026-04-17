@@ -1,0 +1,2 @@
+metric,higher_better_raw_metric,delta_definition,n_total_drugs,n_improve,n_worsen,n_stable,median_delta,mean_delta,improve_threshold,worsen_threshold,n_clean_numeric_features,n_raw_token_features,n_theme_features,n_raw_token_rows,n_raw_token_audit_rows,n_mapped_theme_token_rows,classifier_max_features,threshold_grid
+R2_ens,True,after-before,57,20,16,21,-0.0005874605023999946,-0.0011581530186174755,0.01,0.01,40,1952,17,6736,6536,1782,12,0.005 | 0.01 | 0.02
