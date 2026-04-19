@@ -1,0 +1,7 @@
+# pip install -r scripts/requirements-improve-analysis.txt
+pandas>=1.5
+numpy>=1.23
+scipy>=1.9
+scikit-learn>=1.3
+mygene>=3.2
+requests>=2.28

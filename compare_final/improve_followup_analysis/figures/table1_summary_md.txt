@@ -1,0 +1,9 @@
+| Item | Value |
+|------|-------|
+| Metric | R2_ens |
+| Delta definition | after-before |
+| Total drugs | 57 |
+| Improve | 20 |
+| Worsen | 16 |
+| Stable | 21 |
+| Threshold (improve/worsen) | ±0.01 |

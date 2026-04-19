@@ -1,0 +1,2 @@
+source,native,name,p_value,significant,term_size,query_size,intersection_size,intersection_genes
+GO:BP,GO:0007200,phospholipase C-activating G protein-coupled receptor signaling pathway,0.0426084931599196,True,27,313,26,
