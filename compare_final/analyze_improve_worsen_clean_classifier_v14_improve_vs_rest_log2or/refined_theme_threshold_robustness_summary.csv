@@ -1,0 +1,17 @@
+feature,theme,thresholds_evaluable,threshold_median_log2_odds_ratio,threshold_sign_consistency,threshold_p_lt_0_05_rate,threshold_fdr_lt_0_10_rate,threshold_majority_direction
+refined_theme_ION_CHANNEL_TRANSPORTER,ION_CHANNEL_TRANSPORTER,3,1.822443226729626,1.0,0.0,0.0,enriched_in_improve
+refined_theme_MAP2K_MEK_ERK_RAF_CASCADE,MAP2K_MEK_ERK_RAF_CASCADE,3,1.391139231581479,1.0,0.0,0.0,enriched_in_improve
+refined_theme_CELL_CYCLE_MITOSIS_KINASE,CELL_CYCLE_MITOSIS_KINASE,3,-1.8421203402182809,1.0,0.0,0.0,enriched_in_worsen
+refined_theme_ERBB_EGFR_FAMILY_RTK,ERBB_EGFR_FAMILY_RTK,2,2.441605799569504,1.0,0.0,0.0,enriched_in_improve
+refined_theme_RTK_SIGNALING_BROAD,RTK_SIGNALING_BROAD,2,2.220864808451919,1.0,0.0,0.0,enriched_in_improve
+refined_theme_SER_THR_KINASE_SIGNALING,SER_THR_KINASE_SIGNALING,2,1.2643560118364578,1.0,0.0,0.0,enriched_in_improve
+refined_theme_DNA_REPLICATION_GENOME_INTEGRITY,DNA_REPLICATION_GENOME_INTEGRITY,3,-0.3514723705013777,1.0,0.0,0.0,enriched_in_worsen
+refined_theme_PARP_DNA_REPAIR_CHECKPOINT,PARP_DNA_REPAIR_CHECKPOINT,2,-0.8992601323414213,1.0,0.0,0.0,enriched_in_worsen
+refined_theme_APOPTOSIS_BCL2,APOPTOSIS_BCL2,2,2.269458967970899,1.0,0.0,0.0,enriched_in_improve
+refined_theme_SRC_LCK_NONRECEPTOR_TK,SRC_LCK_NONRECEPTOR_TK,3,0.8850642331553401,1.0,0.0,0.0,enriched_in_improve
+refined_theme_EPH_RECEPTOR_SIGNALING,EPH_RECEPTOR_SIGNALING,2,-0.5955141252135565,1.0,0.0,0.0,enriched_in_worsen
+refined_theme_JNK_P38_STRESS_MAPK,JNK_P38_STRESS_MAPK,2,1.2041749699660524,1.0,0.0,0.0,enriched_in_improve
+refined_theme_MET_HGF_RTK,MET_HGF_RTK,2,0.8810388275771697,1.0,0.0,0.0,enriched_in_improve
+refined_theme_VEGFR_FGFR_PDGFR_KIT_FLT_RTK,VEGFR_FGFR_PDGFR_KIT_FLT_RTK,2,0.4755451997595268,1.0,0.0,0.0,enriched_in_improve
+refined_theme_PI3K_AKT_MTOR,PI3K_AKT_MTOR,2,0.6093370665451688,1.0,0.0,0.0,enriched_in_improve
+refined_theme_CHROMATIN_EPIGENETIC,CHROMATIN_EPIGENETIC,2,-0.19566345045647207,1.0,0.0,0.0,enriched_in_worsen
